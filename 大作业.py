@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use("TkAgg")
+
 import matplotlib.pyplot as plt
 import torch
 from torchvision.datasets import MNIST
@@ -5,82 +8,112 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 from torch import nn
 import os
-
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+from PIL import Image
 
 # 预处理：将两个步骤整合在一起
-transform = transforms.Compose({
-    transforms.ToTensor(), # 转为Tensor，范围改为0-1
-    transforms.Normalize((0.1307,),(0.3081)) # 数据归一化，即均值为0，标准差为1
-})
+transform = transforms.Compose([
+    transforms.ToTensor(),  # 转为Tensor，范围改为0-1
+    transforms.Normalize((0.1307,), (0.3081))  # 数据归一化，即均值为0，标准差为1
+])
 
 # 训练数据集
-train_data = MNIST(root='./data',train=True,download=True,transform=transforms.ToTensor())
-train_loader = DataLoader(train_data,shuffle=True,batch_size=64)
+train_data = MNIST(root='./data', train=True, download=True, transform=transform)
+train_loader = DataLoader(train_data, shuffle=True, batch_size=64)
 
 # 测试数据集
-test_data = MNIST(root='./data',train=False,download=False,transform=transforms.ToTensor())
-test_loader = DataLoader(test_data,shuffle=False,batch_size=128)
+test_data = MNIST(root='./data', train=False, download=True, transform=transform)
+test_loader = DataLoader(test_data, shuffle=False, batch_size=64)
 
-# 模型
-class Model(nn.Module):
+
+# CNN模型
+class CNNModel(nn.Module):
     def __init__(self):
-        super(Model,self).__init__()
-        self.linear1 = nn.Linear(784,256)
-        self.linear2 = nn.Linear(256,64)
-        self.linear3 = nn.Linear(64,10) # 10个手写数字对应的10个输出
+        super(CNNModel, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.fc1 = nn.Linear(64 * 7 * 7, 128)
+        self.fc2 = nn.Linear(128, 10)
 
-    def forward(self,x):
-        x = x.view(-1,784) # 变形
-        x = torch.relu(self.linear1(x))
-        x = torch.relu(self.linear2(x))
-        x = torch.relu(self.linear3(x))
+    def forward(self, x):
+        x = self.pool(torch.relu(self.conv1(x)))  # shape: (batch_size, 32, 14, 14)
+        x = self.pool(torch.relu(self.conv2(x)))  # shape: (batch_size, 64, 7, 7)
+        x = x.view(-1, 64 * 7 * 7)  # flatten
+        x = torch.relu(self.fc1(x))
+        x = self.fc2(x)
         return x
 
 # CrossEntropyLoss
-model = Model()
-criterion = nn.CrossEntropyLoss() # 交叉熵损失，相当于Softmax+Log+NllLoss
-optimizer = torch.optim.SGD(model.parameters(),0.01) # 第一个参数是初始化参数值，第二个参数是学习率
+model = CNNModel()
+criterion = nn.CrossEntropyLoss()  # 交叉熵损失，相当于Softmax+Log+NllLoss
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
 
 # 模型训练
 def train():
-    for index,data in enumerate(train_loader):
-        input,target = data # input为输入数据，target为标签
-        optimizer.zero_grad() # 梯度清零
-        y_predict = model(input) # 模型预测
-        loss = criterion(y_predict,target) # 计算损失
-        loss.backward() # 反向传播
-        optimizer.step() # 更新参数
-        if index % 100 == 0: # 每一百次保存一次模型，打印损失
-            torch.save(model.state_dict(),"./model/model.pkl") # 保存模型
-            torch.save(optimizer.state_dict(),"./model/optimizer.pkl")
-            print("损失值为：%.2f" % loss.item())
+    for epoch in range(5):  # 训练5个epoch
+        for index, (input, target) in enumerate(train_loader):
+            optimizer.zero_grad()  # 梯度清零
+            y_predict = model(input)  # 模型预测
+            loss = criterion(y_predict, target)  # 计算损失
+            loss.backward()  # 反向传播
+            optimizer.step()  # 更新参数
+            if index % 100 == 0:  # 每一百次打印一次损失
+                print(f"Epoch [{epoch + 1}/5], Step [{index + 1}/{len(train_loader)}], Loss: {loss.item():.4f}")
 
-# 在保存模型之前创建目录
-if not os.path.exists('./model'):
-    os.makedirs('./model')
-
-# 加载模型
-if os.path.exists('./model/model.pkl'):
-    model.load_state_dict(torch.load("./model/model.pkl")) # 加载保存模型的参数
 
 # 模型测试
 def test():
-    correct = 0 # 正确预测的个数
-    total = 0 # 总数
-    with torch.no_grad(): # 测试不用计算梯度
+    correct = 0  # 正确预测的个数
+    total = 0  # 总数
+    with torch.no_grad():  # 测试不用计算梯度
         for data in test_loader:
-            input,target = data
-            output=model(input) # output输出10个预测取值，其中最大的即为预测的数
-            probability,predict=torch.max(output.data,dim=1) # 返回一个元组，第一个为最大概率值，第二个为最大值的下标
-            total += target.size(0) # target是形状为(batch_size,1)的矩阵，使用size(0)取出该批的大小
-            correct += (predict == target).sum().item() # predict和target均为(batch_size,1)的矩阵，sum()求出相等的个数
+            input, target = data
+            output = model(input)  # output输出10个预测取值，其中最大的即为预测的数
+            _, predict = torch.max(output.data, dim=1)  # 返回一个元组，第一个为最大概率值，第二个为最大值的下标
+            total += target.size(0)  # target是形状为(batch_size,1)的矩阵，使用size(0)取出该批的大小
+            correct += (predict == target).sum().item()  # predict和target均为(batch_size,1)的矩阵，sum()求出相等的个数
         print("准确率为：%.2f" % (correct / total))
 
 
+# 自定义手写数字识别测试
+def test_mydata():
+    # 确保图片路径正确，并且图片是灰度的
+    image_path = 'test_one.png'  # 替换为你的图片路径
+    if not os.path.exists(image_path):
+        print(f"图片文件不存在：{image_path}")
+        return
+
+    image = Image.open(image_path)  # 读取自定义手写图片
+    image = image.resize((28, 28))  # 裁剪尺寸为28*28
+    image = image.convert('L')  # 转换为灰度图像
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081))
+    ])
+    image = transform(image)
+    image = image.unsqueeze(0)  # 添加batch维度
+    output = model(image)
+    probability, predict = torch.max(output.data, dim=1)
+    print("此手写图片值为:%d,其最大概率为:%.2f" % (predict[0], probability))
+    plt.title('此手写图片值为：{}'.format((int(predict))), fontname="SimHei")
+    plt.imshow(image.squeeze().numpy(), cmap='gray')
+    plt.show()
+
+
+# 创建模型目录
+os.makedirs("model2", exist_ok=True)
 
 # 主函数
 if __name__ == '__main__':
     # 训练与测试
-    for i in range(5): # 训练和测试进行五轮
-        train()
-        test()
+    train()
+    test()
+
+    # 保存模型
+    torch.save(model.state_dict(), "model2/model.pkl")
+    print("模型已保存到 ./model2/model.pkl")
+
+    # 自定义测试
+    test_mydata()
