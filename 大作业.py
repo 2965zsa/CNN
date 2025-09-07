@@ -30,24 +30,27 @@ test_loader = DataLoader(test_data, shuffle=False, batch_size=64)
 class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        self.fc1 = nn.Linear(64 * 7 * 7, 128)
-        self.fc2 = nn.Linear(128, 10)
+        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.dropout = nn.Dropout(0.5)
+        self.fc1 = nn.Linear(128 * 3 * 3, 256)
+        self.fc2 = nn.Linear(256, 10)
 
     def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))  # shape: (batch_size, 32, 14, 14)
-        x = self.pool(torch.relu(self.conv2(x)))  # shape: (batch_size, 64, 7, 7)
-        x = x.view(-1, 64 * 7 * 7)  # flatten
-        x = torch.relu(self.fc1(x))
+        x = self.pool(torch.relu(self.conv1(x)))  # 14x14
+        x = self.pool(torch.relu(self.conv2(x)))  # 7x7
+        x = self.pool(torch.relu(self.conv3(x)))  # 3x3
+        x = x.view(-1, 128 * 3 * 3)
+        x = self.dropout(torch.relu(self.fc1(x)))
         x = self.fc2(x)
         return x
 
 # CrossEntropyLoss
 model = CNNModel()
 criterion = nn.CrossEntropyLoss()  # 交叉熵损失，相当于Softmax+Log+NllLoss
-optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 
 # 模型训练
@@ -80,7 +83,7 @@ def test():
 # 自定义手写数字识别测试
 def test_mydata():
     # 确保图片路径正确，并且图片是灰度的
-    image_path = 'test_one.png'  # 替换为你的图片路径
+    image_path = 'test_6.png'  # 替换为你的图片路径
     if not os.path.exists(image_path):
         print(f"图片文件不存在：{image_path}")
         return
@@ -88,7 +91,9 @@ def test_mydata():
     image = Image.open(image_path)  # 读取自定义手写图片
     image = image.resize((28, 28))  # 裁剪尺寸为28*28
     image = image.convert('L')  # 转换为灰度图像
-    transform = transforms.Compose([
+    train_transform = transforms.Compose([
+        transforms.RandomRotation(10),  # 随机旋转
+        transforms.RandomAffine(0, translate=(0.1, 0.1)),  # 平移
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081))
     ])
@@ -108,8 +113,9 @@ os.makedirs("model2", exist_ok=True)
 # 主函数
 if __name__ == '__main__':
     # 训练与测试
-    train()
-    test()
+    for epoch in range(5):
+        train()
+        test()
 
     # 保存模型
     torch.save(model.state_dict(), "model2/model.pkl")
